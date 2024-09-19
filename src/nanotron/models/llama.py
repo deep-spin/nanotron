@@ -1027,6 +1027,10 @@ class LlamaForTraining(NanotronModel):
     ):
         super().__init__()
         self.model = LlamaModel(config=config, parallel_context=parallel_context, parallel_config=parallel_config)
+        if config.loss_function in {"entmax15", "sparsemax"}:
+            module_output_keys = {"loss", "support_size"}
+        else:
+            module_output_keys = {"loss"}
         self.loss = PipelineBlock(
             p2p=self.model.p2p,
             module_builder=Loss,
@@ -1042,7 +1046,7 @@ class LlamaForTraining(NanotronModel):
                 "label_ids",
                 "label_mask",
             },
-            module_output_keys={"loss"},
+            module_output_keys=module_output_keys,
         )
         self.parallel_context = parallel_context
         self.config = config
