@@ -15,10 +15,13 @@
 """PyTorch LLaMa model."""
 
 from typing import Dict, List, Optional, Union
+from functools import partial
 
 import torch
 from torch import nn
 from torch.utils.checkpoint import CheckpointFunction
+
+import entmax
 
 from nanotron import distributed as dist
 from nanotron import logging
@@ -955,9 +958,13 @@ def masked_mean(loss, label_mask, dtype):
 
 
 class Loss(nn.Module):
-    def __init__(self, tp_pg: dist.ProcessGroup):
+    def __init__(self, tp_pg: dist.ProcessGroup, loss_function="cross_entropy", alpha=1.0, topk=512, n_iter=30):
         super().__init__()
         self.tp_pg = tp_pg
+        self.loss_function = loss_function
+        self.alpha = alpha
+        self.topk = topk
+        self.n_iter = n_iter
 
     def forward(
         self,
@@ -968,13 +975,37 @@ class Loss(nn.Module):
         # Megatron by defaults cast everything in fp32. `--f16-lm-cross-entropy` is an option you can use to keep current precision.
         # https://github.com/NVIDIA/Megatron-LM/blob/f267e6186eae1d6e2055b412b00e2e545a8e896a/megatron/model/gpt_model.py#L38
 
-        loss = sharded_cross_entropy(
-            sharded_logits, label_ids.transpose(0, 1).contiguous(), group=self.tp_pg, dtype=torch.float
-        ).transpose(0, 1)
-        # TODO @thomasw21: It's unclear what kind of normalization we want to do.
-        loss = masked_mean(loss, label_mask, dtype=torch.float)
-        # I think indexing causes a sync we don't actually want
-        # loss = loss[label_mask].sum()
+        if self.loss_function == "cross_entropy":
+            loss = sharded_cross_entropy(
+                sharded_logits, label_ids.transpose(0, 1).contiguous(), group=self.tp_pg, dtype=torch.float
+            ).transpose(0, 1)
+            # TODO @thomasw21: It's unclear what kind of normalization we want to do.
+            loss = masked_mean(loss, label_mask, dtype=torch.float)
+            # I think indexing causes a sync we don't actually want
+            # loss = loss[label_mask].sum()
+        else:
+            # pasted from Megatron-DeepSpeed with minimal changes
+            loss_funcs = {
+                "entmax15": partial(entmax.entmax15_loss, k=self.topk, return_support_size=True),
+                "sparsemax": partial(entmax.sparsemax_loss, k=self.topk, return_support_size=True),
+                "entmax_bisect": partial(entmax.entmax_bisect_loss, alpha=self.alpha, n_iter=self.n_iter)
+            }
+            f = loss_funcs[self.loss_function]
+            b, s = label_ids.size()
+            sharded_logits = sharded_logits.transpose(0, 1).contiguous()
+            vocab_size = sharded_logits.size(-1)
+
+            # currently entmax_bisect_loss always returns a None support size
+            loss = f(sharded_logits.float().view(-1, vocab_size), label_ids.view(-1))
+            if isinstance(loss, tuple):
+                loss, support = loss
+            else:
+                support = None
+            loss = loss.view(b, s)
+            loss = masked_mean(loss, label_mask, dtype=torch.float)
+            # bpop: it's not clear to me what masking is necessary, given that
+            # sequences should be packed...right?
+
         return {"loss": loss}
 
 
@@ -991,7 +1022,13 @@ class LlamaForTraining(NanotronModel):
         self.loss = PipelineBlock(
             p2p=self.model.p2p,
             module_builder=Loss,
-            module_kwargs={"tp_pg": parallel_context.tp_pg},
+            module_kwargs={
+                "tp_pg": parallel_context.tp_pg,
+                "alpha": config.loss_alpha,
+                "loss_function": config.loss_function,
+                "topk": config.loss_topk,
+                "n_iter": config.loss_n_iter
+            },
             module_input_keys={
                 "sharded_logits",
                 "label_ids",

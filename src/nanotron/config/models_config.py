@@ -55,6 +55,12 @@ class LlamaConfig:
     use_cache: bool = True
     vocab_size: int = 32000
 
+    # entmax stuff
+    loss_function: str = "cross_entropy"
+    loss_alpha: float = 1.0
+    loss_topk: int = 512
+    loss_n_iter: int = 30
+
     def __post_init__(self):
         # NOTE: user don't set self._init_method, ModelArgs will set it
         # then we only pass LlamaConfig around
