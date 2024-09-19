@@ -57,8 +57,8 @@ model:
     use_cache: true
     vocab_size: 49152
     loss_function: entmax15
-    loss_alpha: float = 1.5
-    loss_topk: int = 8192
+    loss_alpha: 1.5
+    loss_topk: 8192
 optimizer:
   accumulate_grad_in_fp32: true
   clip_grad: 1.0
