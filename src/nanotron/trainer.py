@@ -614,7 +614,7 @@ class DistributedTrainer:
             if self.config.optimizer.clip_grad is not None:
                 log_entries.append(LogItem("grad_norm", self.grad_norm_unclipped.item(), "human_format"))  # , ".3f"))
 
-            if "support size" in outputs[0]:
+            if "support_size" in outputs[0]:
                 avg_support = torch.stack(
                     [output["support_size"] for output in outputs]
                 ).sum().item()
