@@ -619,6 +619,11 @@ class DistributedTrainer:
                     [output["support_size"] for output in outputs]
                 ).sum().item()
                 log_entries.append(LogItem("support_size", avg_support, "human_format"))
+            if "support_size_max" in outputs[0]:
+                max_support = torch.stack(
+                    [output["support_size_max"] for output in outputs]
+                ).max().item()
+                log_entries.append(LogItem("support_size_max", max_support, "human_format"))
 
             # Log not too often the memory
             if self.iteration_step < 5 or (self.iteration_step - 1) % self.config.checkpoints.checkpoint_interval == 0:

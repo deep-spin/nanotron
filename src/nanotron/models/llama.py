@@ -1003,10 +1003,12 @@ class Loss(nn.Module):
                 loss, support = loss
                 # what size is the support? (b*s) x 1, I guess
                 support = support.view(b, s).float()
+                output["support_size_max"] = support.max()
+
                 # sum support over non-masked positions, divide by number of
                 # non-masked positions. So the numbers will be averages for the
                 # whole microbatch
-                output["support_size"] = masked_mean(support, label_mask, dtype=torch.float)
+                output["support_size"] = masked_mean(support.float(), label_mask, dtype=torch.float)
             loss = loss.view(b, s)
             loss = masked_mean(loss, label_mask, dtype=torch.float)
             # bpop: it's not clear to me what masking is necessary, given that
@@ -1028,7 +1030,7 @@ class LlamaForTraining(NanotronModel):
         super().__init__()
         self.model = LlamaModel(config=config, parallel_context=parallel_context, parallel_config=parallel_config)
         if config.loss_function in {"entmax15", "sparsemax"}:
-            module_output_keys = {"loss", "support_size"}
+            module_output_keys = {"loss", "support_size", "support_size_max"}
         else:
             module_output_keys = {"loss"}
         self.loss = PipelineBlock(
