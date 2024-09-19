@@ -51,6 +51,11 @@ class PipelineEngine(ABC):
         if not isinstance(output["loss"], TensorPointer):
             output["loss"] = output["loss"] / self.nb_microbatches
 
+        if "support_size" in output:
+            if not isinstance(output["support_size"], TensorPointer):
+                # BP: no idea if this TensorPointer check is necessary
+                output["support_size"] = output["support_size"] / self.nb_microbatches
+
         # Add output as activations that require backward pass
         if not isinstance(output["loss"], TensorPointer):
             assert output["loss"].requires_grad

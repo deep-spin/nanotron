@@ -614,6 +614,12 @@ class DistributedTrainer:
             if self.config.optimizer.clip_grad is not None:
                 log_entries.append(LogItem("grad_norm", self.grad_norm_unclipped.item(), "human_format"))  # , ".3f"))
 
+            if "support size" in outputs[0]:
+                avg_support = torch.stack(
+                    [output["support_size"] for output in outputs]
+                ).sum().item()
+                log_entries.append(LogItem("support_size", avg_support, "human_format"))
+
             # Log not too often the memory
             if self.iteration_step < 5 or (self.iteration_step - 1) % self.config.checkpoints.checkpoint_interval == 0:
                 total, used, free = shutil.disk_usage("/")

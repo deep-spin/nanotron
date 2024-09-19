@@ -975,6 +975,8 @@ class Loss(nn.Module):
         # Megatron by defaults cast everything in fp32. `--f16-lm-cross-entropy` is an option you can use to keep current precision.
         # https://github.com/NVIDIA/Megatron-LM/blob/f267e6186eae1d6e2055b412b00e2e545a8e896a/megatron/model/gpt_model.py#L38
 
+        output = dict()
+
         if self.loss_function == "cross_entropy":
             loss = sharded_cross_entropy(
                 sharded_logits, label_ids.transpose(0, 1).contiguous(), group=self.tp_pg, dtype=torch.float
@@ -999,14 +1001,20 @@ class Loss(nn.Module):
             loss = f(sharded_logits.float().view(-1, vocab_size), label_ids.view(-1))
             if isinstance(loss, tuple):
                 loss, support = loss
-            else:
-                support = None
+                # what size is the support? (b*s) x 1, I guess
+                support = support.view(b, s).float()
+                # sum support over non-masked positions, divide by number of
+                # non-masked positions. So the numbers will be averages for the
+                # whole microbatch
+                output["support_size"] = masked_mean(support, label_mask, dtype=torch.float)
             loss = loss.view(b, s)
             loss = masked_mean(loss, label_mask, dtype=torch.float)
             # bpop: it's not clear to me what masking is necessary, given that
             # sequences should be packed...right?
 
-        return {"loss": loss}
+        output["loss"] = loss
+
+        return output
 
 
 class LlamaForTraining(NanotronModel):
@@ -1051,12 +1059,12 @@ class LlamaForTraining(NanotronModel):
             input_ids=input_ids,
             input_mask=input_mask,
         )
-        loss = self.loss(
+        output = self.loss(
             sharded_logits=sharded_logits,
             label_ids=label_ids,
             label_mask=label_mask,
-        )["loss"]
-        return {"loss": loss}
+        )
+        return output  # previously, it would return a dict containing only loss regardless of what self.loss returned
 
     @torch.no_grad()
     def init_model_randomly(self, config: Config):
